@@ -74,4 +74,38 @@ gong/
 
 ## Лицензия
 
-MIT 
+MIT
+
+## Структура проекта
+
+- `backend/` — серверная часть (Flask API)
+- `frontend/` — веб-интерфейс (HTML/JS)
+- `esp32/` — прошивка для ESP32 (создать при необходимости)
+
+## Запуск backend (Flask)
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+## Запуск frontend
+
+Откройте файл `frontend/index.html` в браузере. Для работы с API backend должен быть запущен на http://localhost:5000
+
+## Требования
+- Python 3.8+
+- Flask
+- Flask-CORS
+- Браузер (Chrome, Firefox, Edge)
+
+## ESP32
+
+Прошивка для ESP32 размещается в папке `esp32/` (создайте при необходимости). Включает работу с WiFi, SPIFFS/LittleFS, DFPlayer Mini, NTP и REST API.
+
+---
+
+Проект реализует веб-интерфейс для управления будильниками, серверную часть на Flask и предполагает интеграцию с ESP32. 
