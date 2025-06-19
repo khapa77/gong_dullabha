@@ -1,6 +1,11 @@
 # Gong - Будильник по расписанию
 
+🚧 **Work in Progress** 🚧  
+This project is currently under development.  
+
 Проект умного будильника на базе ESP32-WROOM-32D с веб-интерфейсом для управления расписанием.
+
+![Status](https://img.shields.io/badge/status-in%20development-yellow)
 
 ## Функциональность
 
