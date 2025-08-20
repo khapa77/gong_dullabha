@@ -3,10 +3,11 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WiFiClient.h>
-
 #include <DFRobotDFPlayerMini.h>
 #include <HardwareSerial.h>
 #include <esp_task_wdt.h>
+#include <ArduinoJson.h>
+#include <time.h>
 // #include <NTPClient.h>
 // #include <WiFiUdp.h>
 
@@ -22,6 +23,22 @@ DFRobotDFPlayerMini dfPlayer;
 String wifi_ssid = DEFAULT_WIFI_SSID;
 String wifi_pass = DEFAULT_WIFI_PASSWORD;
 WebServer server(80);
+
+// Структура будильника
+struct Alarm {
+  String time;
+  std::vector<int> days;
+  int track;
+  int volume;
+  String label;
+  bool enabled;
+  time_t nextTrigger;
+};
+
+std::vector<Alarm> alarms;
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 0;
+const int daylightOffset_sec = 3600;
 
 // Task handles for watchdog management
 TaskHandle_t mainTaskHandle = NULL;
@@ -70,6 +87,113 @@ void readWiFiConfig() {
   Serial.print(wifi_ssid);
   Serial.print(", PASS=");
   Serial.println(wifi_pass);
+}
+
+// Функции для работы с будильниками
+void loadAlarms() {
+  File file = SPIFFS.open("/alarms.json", "r");
+  if (!file) {
+    Serial.println("Файл будильников не найден, создаем новый");
+    return;
+  }
+  
+  DynamicJsonDocument doc(2048);
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  
+  if (error) {
+    Serial.println("Ошибка чтения файла будильников");
+    return;
+  }
+  
+  alarms.clear();
+  JsonArray alarmsArray = doc["alarms"];
+  for (JsonObject alarmObj : alarmsArray) {
+    Alarm alarm;
+    alarm.time = alarmObj["time"].as<String>();
+    alarm.track = alarmObj["track"] | 1;
+    alarm.volume = alarmObj["volume"] | 20;
+    alarm.label = alarmObj["label"].as<String>();
+    alarm.enabled = alarmObj["enabled"] | true;
+    
+    JsonArray daysArray = alarmObj["days"];
+    for (int day : daysArray) {
+      alarm.days.push_back(day);
+    }
+    
+    alarms.push_back(alarm);
+  }
+  
+  Serial.printf("Загружено %d будильников\n", alarms.size());
+}
+
+void saveAlarms() {
+  DynamicJsonDocument doc(2048);
+  JsonArray alarmsArray = doc.createNestedArray("alarms");
+  
+  for (const Alarm& alarm : alarms) {
+    JsonObject alarmObj = alarmsArray.createNestedObject();
+    alarmObj["time"] = alarm.time;
+    alarmObj["track"] = alarm.track;
+    alarmObj["volume"] = alarm.volume;
+    alarmObj["label"] = alarm.label;
+    alarmObj["enabled"] = alarm.enabled;
+    
+    JsonArray daysArray = alarmObj.createNestedArray("days");
+    for (int day : alarm.days) {
+      daysArray.add(day);
+    }
+  }
+  
+  File file = SPIFFS.open("/alarms.json", "w");
+  if (file) {
+    serializeJson(doc, file);
+    file.close();
+    Serial.println("Будильники сохранены");
+  } else {
+    Serial.println("Ошибка сохранения будильников");
+  }
+}
+
+void checkAlarms() {
+  if (!time(nullptr)) return; // Время не синхронизировано
+  
+  time_t now = time(nullptr);
+  struct tm* timeinfo = localtime(&now);
+  int currentDay = timeinfo->tm_wday;
+  int currentHour = timeinfo->tm_hour;
+  int currentMin = timeinfo->tm_min;
+  
+  for (Alarm& alarm : alarms) {
+    if (!alarm.enabled) continue;
+    
+    // Проверяем, активен ли будильник для текущего дня
+    bool dayActive = false;
+    for (int day : alarm.days) {
+      if (day == currentDay) {
+        dayActive = true;
+        break;
+      }
+    }
+    
+    if (!dayActive) continue;
+    
+    // Парсим время будильника
+    int alarmHour, alarmMin;
+    if (sscanf(alarm.time.c_str(), "%d:%d", &alarmHour, &alarmMin) != 2) continue;
+    
+    // Проверяем, пора ли сработать
+    if (currentHour == alarmHour && currentMin == alarmMin) {
+      Serial.printf("Будильник сработал: %s\n", alarm.label.c_str());
+      
+      // Устанавливаем громкость и воспроизводим трек
+      dfPlayer.volume(alarm.volume);
+      dfPlayer.play(alarm.track);
+      
+      // Небольшая задержка, чтобы будильник не срабатывал несколько раз
+      delay(1000);
+    }
+  }
 }
 
 bool connectWiFi(int maxAttempts, int retryDelayMs) {
@@ -124,6 +248,12 @@ void setup() {
   // Чтение параметров WiFi из файла
   readWiFiConfig();
 
+  // Инициализация времени
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  
+  // Загрузка будильников
+  loadAlarms();
+
   // Подключение к WiFi с повторными попытками
   int maxRetries = 5;
   int retryDelay = 2000; // 2 секунды
@@ -149,6 +279,17 @@ void setup() {
     // dfPlayer.play(1);    // Воспроизвести первый трек на SD (убрано для ручного управления)
   }
 
+  // Главная страница
+  server.on("/", HTTP_GET, [](){
+    File file = SPIFFS.open("/index.html", "r");
+    if (!file) {
+      server.send(404, "text/plain", "File not found");
+      return;
+    }
+    server.streamFile(file, "text/html");
+    file.close();
+  });
+  
   // Веб-форма для смены WiFi
   server.on("/wifi", HTTP_GET, [](){
     String html = "<html><body><h2>Настройка WiFi</h2>"
@@ -219,8 +360,107 @@ void setup() {
   });
   // --- конец REST API DFPlayer ---
 
+  // --- REST API для будильников ---
+  // Получить список будильников
+  server.on("/api/alarms", HTTP_GET, [](){
+    DynamicJsonDocument doc(2048);
+    JsonArray alarmsArray = doc.createNestedArray("alarms");
+    
+    for (const Alarm& alarm : alarms) {
+      JsonObject alarmObj = alarmsArray.createNestedObject();
+      alarmObj["time"] = alarm.time;
+      alarmObj["track"] = alarm.track;
+      alarmObj["volume"] = alarm.volume;
+      alarmObj["label"] = alarm.label;
+      alarmObj["enabled"] = alarm.enabled;
+      
+      JsonArray daysArray = alarmObj.createNestedArray("days");
+      for (int day : alarm.days) {
+        daysArray.add(day);
+      }
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+  });
+  
+  // Добавить будильник
+  server.on("/api/alarms", HTTP_POST, [](){
+    if (server.hasHeader("Content-Type") && server.header("Content-Type") == "application/json") {
+      String body = server.arg("plain");
+      DynamicJsonDocument doc(1024);
+      DeserializationError error = deserializeJson(doc, body);
+      
+      if (error) {
+        server.send(400, "text/plain", "Invalid JSON");
+        return;
+      }
+      
+      Alarm alarm;
+      alarm.time = doc["time"].as<String>();
+      alarm.track = doc["track"] | 1;
+      alarm.volume = doc["volume"] | 20;
+      alarm.label = doc["label"].as<String>();
+      alarm.enabled = doc["enabled"] | true;
+      
+      JsonArray daysArray = doc["days"];
+      for (int day : daysArray) {
+        alarm.days.push_back(day);
+      }
+      
+      alarms.push_back(alarm);
+      saveAlarms();
+      
+      server.send(200, "application/json", "{\"status\":\"added\"}");
+    } else {
+      server.send(400, "text/plain", "Content-Type must be application/json");
+    }
+  });
+  
+  // Переключить статус будильника
+  server.on("/api/alarms/([0-9]+)/toggle", HTTP_POST, [](){
+    int index = server.pathArg(0).toInt();
+    if (index >= 0 && index < alarms.size()) {
+      alarms[index].enabled = !alarms[index].enabled;
+      saveAlarms();
+      server.send(200, "application/json", "{\"status\":\"toggled\"}");
+    } else {
+      server.send(404, "text/plain", "Alarm not found");
+    }
+  });
+  
+  // Удалить будильник
+  server.on("/api/alarms/([0-9]+)", HTTP_DELETE, [](){
+    int index = server.pathArg(0).toInt();
+    if (index >= 0 && index < alarms.size()) {
+      alarms.erase(alarms.begin() + index);
+      saveAlarms();
+      server.send(200, "application/json", "{\"status\":\"deleted\"}");
+    } else {
+      server.send(404, "text/plain", "Alarm not found");
+    }
+  });
+  
+  // --- конец REST API для будильников ---
+  
+  // --- REST API для WiFi информации ---
+  server.on("/api/wifi/info", HTTP_GET, [](){
+    DynamicJsonDocument doc(512);
+    doc["ssid"] = wifi_ssid;
+    doc["status"] = WiFi.status() == WL_CONNECTED ? "Подключен" : "Отключен";
+    doc["ip"] = WiFi.localIP().toString();
+    doc["signal"] = WiFi.RSSI();
+    
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+  });
+  
+  // --- конец REST API для WiFi информации ---
+
   server.begin();
-  Serial.println("Веб-сервер запущен. Откройте /wifi для настройки WiFi.");
+  Serial.println("Веб-сервер запущен. Откройте / для доступа к интерфейсу.");
 
   // Create tasks for watchdog management
   xTaskCreatePinnedToCore(
@@ -262,6 +502,9 @@ void loop() {
   
   // Handle web server requests
   server.handleClient();
+  
+  // Проверка будильников
+  checkAlarms();
   
   // Basic application logic
   // Check WiFi connection status
