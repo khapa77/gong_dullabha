@@ -60,14 +60,28 @@ ESP32-WROOM-32D
 ## Структура проекта
 
 ```
-gong/
-├── src/
-│   └── gong.ino
-├── data/
+📁 gong_dullabha/
+├── 📄 .gitignore                    # Исключения для Git
+├── 📄 README.md                     # Основная документация
+├── 📄 platformio.ini               # Конфигурация PlatformIO
+├── 📄 upload_spiffs.sh             # Скрипт загрузки файлов
+├── 📁 data/                        # Веб-интерфейс для ESP32
 │   ├── index.html
-│   ├── styles.css
-│   └── script.js
-└── README.md
+│   └── main.js
+├── 📁 backend/                     # Flask API сервер
+│   ├── app.py
+│   └── requirements.txt
+├── 📁 esp32/                       # Прошивка ESP32
+│   ├── main.cpp
+│   ├── platformio.ini
+│   └── README.md
+├── 📁 frontend/                    # Веб-интерфейс для Flask
+│   ├── index.html
+│   └── main.js
+└── 📁 Документация
+    ├── ESP32_FLASHING.md
+    ├── plan.md
+    └── requirements_analysis.md
 ```
 
 ## API Endpoints
