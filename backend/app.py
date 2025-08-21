@@ -205,7 +205,7 @@ def audio_volume():
 def main():
     init_db_if_needed()
     host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "5000"))
+    port = int(os.environ.get("PORT", "5001"))
     debug = bool(os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"))
     app.run(host=host, port=port, debug=debug)
 

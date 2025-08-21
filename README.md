@@ -111,6 +111,31 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 python app.py
+
+# Далее:
+# Установите PlatformIO
+
+pip3 install platformio 
+python3 -m pip install platformio
+
+
+# 1. Перейти в папку проекта
+cd esp32
+
+# 2. Очистить предыдущую сборку (опционально)
+pio run -t clean
+
+# 3. Скомпилировать проект
+pio run
+
+# 4. Загрузить прошивку на ESP32
+pio run --target upload
+
+# 5. Загрузить файлы SPIFFS (если нужно)
+pio run --target uploadfs
+
+# 6. Открыть монитор для отладки
+pio device monitor
 ```
 
 ## Запуск frontend
@@ -130,3 +155,4 @@ python app.py
 ---
 
 Проект реализует веб-интерфейс для управления будильниками, серверную часть на Flask и предполагает интеграцию с ESP32. 
+
